@@ -3,8 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
   static const String baseUrl = 'https://poputki-backend.onrender.com/api';
-  static const String securityHeaderKey = 'x-mana-man';
-  static const String securityHeaderValue = 'nasa.2006';
 
   late Dio _dio;
 
@@ -13,7 +11,6 @@ class ApiClient {
       baseUrl: baseUrl,
       headers: {
         'Content-Type': 'application/json',
-        securityHeaderKey: securityHeaderValue,
       },
     ));
 
@@ -29,10 +26,6 @@ class ApiClient {
         if (adminToken != null) {
           options.headers['X-Admin-Token'] = adminToken;
         }
-
-        // Always ensure security header is present (though set in BaseOptions)
-        options.headers[securityHeaderKey] = securityHeaderValue;
-        
         return handler.next(options);
       },
       onError: (DioException e, handler) {

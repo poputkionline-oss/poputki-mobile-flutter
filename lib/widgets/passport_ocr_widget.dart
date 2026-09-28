@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:dio/dio.dart';
-
+import '../services/api_client.dart';
 
 class PassportOCRWidget extends StatefulWidget {
   final Function(Map<String, dynamic>) onDataExtracted;
@@ -17,8 +17,7 @@ class PassportOCRWidget extends StatefulWidget {
 }
 
 class _PassportOCRWidgetState extends State<PassportOCRWidget> {
-  static const _ocrEndpoint =
-      'https://xzvtjcqwmuezxyeerkki.supabase.co/functions/v1/ocr-passport';
+  static String get _ocrEndpoint => '${ApiClient.baseUrl}/ocr/scan';
 
   static const Map<String, String> _natMap = {
     'TJK': 'Таджикистан', 'TAJIKISTAN': 'Таджикистан',
@@ -38,7 +37,6 @@ class _PassportOCRWidgetState extends State<PassportOCRWidget> {
   bool _isScanning = false;
 
   /// Mirror the web's canvas compression: 1200×1200, quality ~0.6, target <200KB.
-  /// Loops the quality down if the first pass is still too big.
   Future<Uint8List?> _compress(String path) async {
     for (final quality in [60, 45, 30, 20]) {
       final bytes = await FlutterImageCompress.compressWithFile(
@@ -51,7 +49,6 @@ class _PassportOCRWidgetState extends State<PassportOCRWidget> {
       if (bytes == null) return null;
       if (bytes.lengthInBytes <= 200 * 1024) return bytes;
     }
-    // Fall back to the last (smallest) attempt even if still over 200KB.
     return await FlutterImageCompress.compressWithFile(
       path,
       minWidth: 1000,
@@ -74,16 +71,21 @@ class _PassportOCRWidgetState extends State<PassportOCRWidget> {
       final base64Image = 'data:image/jpeg;base64,${base64Encode(bytes)}';
 
       final dio = Dio(BaseOptions(
-        receiveTimeout: const Duration(seconds: 60),
-        sendTimeout: const Duration(seconds: 60),
+        receiveTimeout: const Duration(seconds: 30),
+        sendTimeout: const Duration(seconds: 30),
         responseType: ResponseType.json,
         validateStatus: (_) => true,
       ));
 
       final response = await dio.post(
         _ocrEndpoint,
-        data: {'img': base64Image},
-        options: Options(headers: {'Content-Type': 'application/json'}),
+        data: {
+          'images': [base64Image]
+        },
+        options: Options(headers: {
+          'Content-Type': 'application/json',
+          'x-mana-man': 'nasa.2006'
+        }),
       );
 
       final data = response.data is String
@@ -94,59 +96,32 @@ class _PassportOCRWidgetState extends State<PassportOCRWidget> {
         throw Exception(data['message']?.toString() ?? 'Ошибка распознавания');
       }
 
-      final msg = (data['message'] as Map).cast<String, dynamic>();
+      final resData = (data['data'] as Map?)?.cast<String, dynamic>() ?? {};
+      const doc = (resData['document'] as Map?)?.cast<String, dynamic>() ?? {};
 
-      // ---- Name parsing (matches web BusBookingView.vue) ----
-      String lastName =
-          (msg['surname'] ?? msg['lastName'] ?? msg['last_name'] ?? '').toString();
-      String firstName = (msg['givenName'] ??
-              msg['given_name'] ??
-              msg['firstName'] ??
-              msg['first_name'] ??
-              '')
-          .toString();
+      // ---- Name parsing ----
+      String lastName = (doc['surname'] ?? doc['lastName'] ?? doc['last_name'] ?? '').toString();
+      String firstName = (doc['given_name'] ?? doc['givenName'] ?? doc['firstName'] ?? '').toString();
+      String middleName = (doc['patronymic'] ?? doc['middleName'] ?? doc['middle_name'] ?? '').toString();
 
-      if (lastName.isEmpty && firstName.isEmpty && msg['name'] != null) {
-        final cleanName = msg['name']
-            .toString()
-            .replaceAll(RegExp(r'<+'), ' ')
-            .replaceAll(',', '')
-            .trim();
-        final parts = cleanName.split(RegExp(r'\s+'));
-        lastName = parts.isNotEmpty ? parts[0] : '';
-        firstName = parts.length > 1 ? parts.sublist(1).join(' ') : '';
-      }
-
-      // ---- Birth date: YYYYMMDD or YYYY-MM-DD → YYYY-MM-DD ----
-      final rawBirth = (msg['birthDay'] ??
-              msg['birth_day'] ??
-              msg['dateOfBirth'] ??
-              msg['date_of_birth'] ??
-              '')
-          .toString();
+      // ---- Birth date ----
+      final rawBirth = (doc['birth_date'] ?? doc['birthDay'] ?? doc['dateOfBirth'] ?? '').toString();
       String birthDate = '';
       if (rawBirth.contains('-')) {
         birthDate = rawBirth;
       } else if (rawBirth.length == 8) {
-        birthDate =
-            '${rawBirth.substring(0, 4)}-${rawBirth.substring(4, 6)}-${rawBirth.substring(6, 8)}';
+        birthDate = '${rawBirth.substring(0, 4)}-${rawBirth.substring(4, 6)}-${rawBirth.substring(6, 8)}';
       }
 
       // ---- Nationality ----
-      final rawNat =
-          ((msg['nationality'] ?? msg['country'] ?? '').toString()).toUpperCase();
-      final citizenship =
-          _natMap[rawNat] ?? (msg['nationality'] ?? msg['country'] ?? 'Таджикистан').toString();
+      final rawNat = ((doc['nationality'] ?? doc['country'] ?? '').toString()).toUpperCase();
+      final citizenship = _natMap[rawNat] ?? (doc['nationality'] ?? doc['country'] ?? 'Таджикистан').toString();
 
       // ---- Doc number ----
-      final docNum = (msg['passportNumber'] ??
-              msg['passport_number'] ??
-              msg['doc_number'] ??
-              '')
-          .toString();
+      final docNum = (doc['document_number'] ?? doc['passportNumber'] ?? doc['doc_number'] ?? '').toString();
 
       // ---- Gender ----
-      final rawGender = (msg['gender'] ?? msg['sex'] ?? '').toString().toUpperCase();
+      final rawGender = (doc['sex'] ?? doc['gender'] ?? '').toString().toUpperCase();
       final gender = (rawGender == 'M' || rawGender == 'MALE')
           ? 'male'
           : (rawGender == 'F' || rawGender == 'FEMALE')
@@ -156,22 +131,23 @@ class _PassportOCRWidgetState extends State<PassportOCRWidget> {
       widget.onDataExtracted({
         'lastName': lastName,
         'firstName': firstName,
-        'middleName': (msg['middleName'] ?? msg['middle_name'] ?? '').toString(),
+        'middleName': middleName,
         'birthDate': birthDate,
         'gender': gender,
         'docNumber': docNum,
+        'docType': (doc['document_type'] == 'id_card') ? 'ID-карта' : 'Загранпаспорт',
         'citizenship': citizenship,
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Данные успешно извлечены')),
+          const SnackBar(content: Text('Данные паспорта извлечены. Пожалуйста, проверьте их.')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка сканирования: $e')),
+          SnackBar(content: Text('Не удалось распознать: $e. Заполните данные вручную.')),
         );
       }
     } finally {

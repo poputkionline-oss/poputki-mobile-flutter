@@ -70,17 +70,17 @@ class BusTicket {
       busType: json['bus_type'],
       floor1Seats: json['floor1_seats'],
       floor2Seats: json['floor2_seats'],
-      premiumSeats: (json['premium_seats'] as List<dynamic>?)
-          ?.map((e) => e as int)
-          .toList(),
+      premiumSeats: _intList(json['premiumSeats'] ?? json['premium_seats']),
       premiumPrice: (json['premium_price'] as num?)?.toDouble(),
       serviceFeePercent: (json['service_fee_percent'] as num?)?.toDouble(),
-      bookedSeats: (json['booked_seats'] as List<dynamic>?)
-          ?.map((e) => e as int)
-          .toList(),
+      // details: `bookedSeats` (confirmed seats); list: `reserved_seats`
+      bookedSeats: _intList(json['bookedSeats'] ?? json['booked_seats'] ?? json['reserved_seats']),
       photos: json['photos'],
       operatorPhone: json['operator_phone'],
       passengerComments: json['passenger_comments'],
     );
   }
+
+  static List<int>? _intList(dynamic v) =>
+      (v as List<dynamic>?)?.map((e) => (e as num).toInt()).toList();
 }

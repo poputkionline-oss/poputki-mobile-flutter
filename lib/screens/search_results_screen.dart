@@ -8,6 +8,8 @@ import '../models/ride.dart';
 import '../models/bus_ticket.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../services/geo_city_resolver.dart';
+import '../services/geolocation_service.dart';
 
 class SearchResultsScreen extends StatefulWidget {
   const SearchResultsScreen({super.key});
@@ -20,6 +22,59 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
   final TextEditingController _fromController = TextEditingController();
   final TextEditingController _toController = TextEditingController();
   final TextEditingController _dateController = TextEditingController();
+
+  static bool _geoAttempted = false; // automatic attempt once per app run
+  String? _fromCity;
+  bool _geoLoading = false;
+  String _geoMessage = '';
+  int _geoRevision = 0;
+
+  void _setFromCity(String? city) {
+    _geoRevision++;
+    _geoMessage = '';
+    _fromCity = city;
+    _fromController.text = city ?? '';
+  }
+
+  /// Detects the nearest service city. Returns true if the origin was changed.
+  Future<bool> _detectMyCity(SearchProvider provider, {bool automatic = false}) async {
+    if (_geoLoading || provider.cities.isEmpty) return false;
+    if (automatic) {
+      if (_fromCity != null || _geoAttempted) return false;
+      _geoAttempted = true;
+    }
+    final revision = _geoRevision;
+    final tab = provider.activeTab;
+    setState(() {
+      _geoLoading = true;
+      _geoMessage = 'Определяем город…';
+    });
+    try {
+      final coords = await requestCoordinates(automatic: automatic);
+      final resolver = await GeoCityResolver.load();
+      final city = resolver.resolve(coords.latitude, coords.longitude, provider.cities,
+          accuracy: coords.accuracy);
+      if (!mounted || revision != _geoRevision || tab != provider.activeTab) return false;
+      if (city == null) {
+        setState(() => _geoMessage =
+            'Город рядом с Вами отсутствует в списке отправления. Выберите город вручную.');
+        return false;
+      }
+      setState(() {
+        _fromCity = city;
+        _fromController.text = city;
+        _geoMessage = 'Ближайший город отправления: $city. Вы можете его изменить.';
+      });
+      return true;
+    } catch (e) {
+      if (mounted && revision == _geoRevision && tab == provider.activeTab) {
+        setState(() => _geoMessage = locationErrorMessage(e));
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _geoLoading = false);
+    }
+  }
 
   String _formatRideDate(String dateStr, String timeStr) {
     try {
@@ -47,8 +102,13 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = Provider.of<SearchProvider>(context, listen: false);
-      provider.fetchCities();
-      provider.search();
+      final initialSearch = provider.search();
+      provider.fetchCities().then((_) => _detectMyCity(provider, automatic: true)).then((changed) async {
+        await initialSearch;
+        if (changed && mounted) {
+          provider.search(from: _fromController.text, to: _toController.text, date: _dateController.text);
+        }
+      });
     });
   }
 
@@ -153,7 +213,25 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                     icon: Icons.circle_outlined,
                     iconColor: isRides ? Colors.amber : Colors.blue,
                     provider: provider,
-                    onChanged: (val) => _fromController.text = val ?? '',
+                    value: _fromCity,
+                    onChanged: (val) => setState(() => _setFromCity(val)),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: _geoLoading ? null : () => _detectMyCity(provider),
+                      child: Text(_geoLoading ? '📍 Определяем город…' : '📍 Определить мой город'),
+                    ),
+                  ),
+                  if (_geoMessage.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(_geoMessage,
+                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                    ),
+                  const Text(
+                    'Геолокация используется только для выбора города. Данные GeoNames (CC BY 4.0).',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
                   ),
                   const SizedBox(height: 16),
                   _buildCityDropdown(
@@ -244,8 +322,10 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
     required Color iconColor,
     required SearchProvider provider,
     required Function(String?) onChanged,
+    String? value,
   }) {
     return DropdownButtonFormField<String>(
+      value: provider.cities.contains(value) ? value : null,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, color: iconColor, size: 18),

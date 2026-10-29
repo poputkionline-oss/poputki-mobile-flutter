@@ -17,6 +17,7 @@ import 'screens/my_rides_screen.dart';
 import 'screens/my_tickets_screen.dart';
 import 'screens/user_profile_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/my_reviews_screen.dart';
 import 'widgets/main_shell.dart';
 
 "Ронандаи гироми фалончи. Сервиси poputki.online барои Шумо мусофир дарефт кард. Лутфан барои тамос бо мусофир "
@@ -123,6 +124,10 @@ class _PoputkiAppState extends State<PoputkiApp> {
         GoRoute(
           path: '/user-profile/:id',
           builder: (context, state) => UserProfileScreen(userId: state.pathParameters['id']!),
+        ),
+        GoRoute(
+          path: '/my-reviews',
+          builder: (context, state) => const MyReviewsScreen(),
         ),
         GoRoute(
           path: '/settings',

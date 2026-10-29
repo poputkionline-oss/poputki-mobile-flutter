@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -1012,9 +1013,13 @@ class _ReviewDialogState extends State<_ReviewDialog> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
+      var message = 'Ошибка при отправке отзыва';
+      if (e is DioException && e.response?.data is Map) {
+        message = (e.response!.data['message'] as String?) ?? message;
+      }
       setState(() {
         _submitting = false;
-        _error = 'Ошибка при отправке отзыва';
+        _error = message;
       });
     }
   }

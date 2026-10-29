@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../services/api_client.dart';
 import '../services/auth_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/bus_review_dialog.dart';
 
 class MyTicketsScreen extends StatefulWidget {
   const MyTicketsScreen({super.key});
@@ -19,11 +20,37 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
   List<dynamic> _bookings = [];
   bool _isLoading = true;
   final Set<String> _expandedPhoneBookings = {};
+  List<dynamic> _reviewEligibility = [];
 
   @override
   void initState() {
     super.initState();
     _fetchBookings();
+    _fetchReviewEligibility();
+  }
+
+  Future<void> _fetchReviewEligibility() async {
+    try {
+      final res = await _apiClient.get('/reviews/bus/eligible');
+      if (mounted) setState(() => _reviewEligibility = res.data as List<dynamic>);
+    } catch (_) {
+      if (mounted) setState(() => _reviewEligibility = []);
+    }
+  }
+
+  Map<String, dynamic>? _eligibilityFor(dynamic bookingId) {
+    for (final r in _reviewEligibility) {
+      if (r['booking_id'].toString() == bookingId.toString()) return r as Map<String, dynamic>;
+    }
+    return null;
+  }
+
+  Future<void> _openReview(int bookingId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => BusReviewDialog(bookingId: bookingId),
+    );
+    if (ok == true) await _fetchReviewEligibility();
   }
 
   Future<void> _fetchBookings() async {
@@ -117,7 +144,7 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor)))
           : RefreshIndicator(
-              onRefresh: _fetchBookings,
+              onRefresh: () async { await _fetchBookings(); await _fetchReviewEligibility(); },
               color: AppTheme.primaryColor,
               child: _bookings.isEmpty
                   ? _buildEmptyState()
@@ -475,6 +502,27 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
                       ),
                     ),
                   ),
+              ],
+
+              if (_eligibilityFor(b['id']) != null) ...[
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _eligibilityFor(b['id'])!['can_review'] == true
+                      ? OutlinedButton.icon(
+                          onPressed: () => _openReview(int.parse(b['id'].toString())),
+                          icon: const Icon(Icons.star, size: 16, color: Color(0xFFD97706)),
+                          label: const Text('Оставить отзыв',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFFD97706))),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 44),
+                            side: const BorderSide(color: Color(0xFFFDE68A)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        )
+                      : const Text('Отзыв оставлен',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
+                ),
               ],
 
               const SizedBox(height: 16),

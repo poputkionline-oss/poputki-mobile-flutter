@@ -144,6 +144,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: () => context.push('/my-tickets'),
               ),
               _buildMenuItem(
+                icon: Icons.star_outline,
+                title: 'Мои отзывы',
+                subtitle: 'Отзывы, которые вы оставили',
+                onTap: () => context.push('/my-reviews'),
+              ),
+              _buildMenuItem(
                 icon: Icons.info_outline,
                 title: 'О приложении',
                 subtitle: 'Версия, разработчики и контакты',
